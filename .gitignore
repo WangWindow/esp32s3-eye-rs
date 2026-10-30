@@ -1,0 +1,12 @@
+/target
+/temp
+
+# Build/flash artifacts
+*.bin
+*.elf
+*.map
+
+# Editor/IDE
+.vscode/
+.zed/
+.helix/
