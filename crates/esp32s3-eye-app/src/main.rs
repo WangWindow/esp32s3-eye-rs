@@ -2,13 +2,7 @@
 #![no_main]
 #![deny(clippy::large_stack_frames)]
 
-mod app;
-mod display;
-mod geometry;
-mod graphics;
-mod modes;
-mod vision;
-
+use esp32s3_eye_app::app;
 use esp32s3_eye_board::Board;
 use static_cell::StaticCell;
 

@@ -7,6 +7,10 @@ description = "ESP32-S3-EYE camera/LCD/SD demo in Rust with esp-hal + Embassy"
 license.workspace = true
 default-run = "esp32s3-eye"
 
+[lib]
+name = "esp32s3_eye_app"
+path = "src/lib.rs"
+
 [[bin]]
 name = "esp32s3-eye"
 path = "src/main.rs"

@@ -6,10 +6,14 @@ use esp_println::println;
 use esp32s3_eye_board::Board;
 use esp32s3_eye_board::buttons::Button;
 use esp32s3_eye_board::storage::SelfTest;
+use static_cell::StaticCell;
 
-use crate::display::{Overlay, Ui};
-use crate::modes::Mode;
-use crate::vision::{Analyzer, analyse};
+use crate::Mode;
+use crate::display::{Overlay, PalmNotice, Ui};
+use crate::face::FaceAnalyzer;
+use crate::palm::{PalmAnalyzer, PalmDatabase, palm_descriptor, palm_roi};
+
+static PALM_DB: StaticCell<PalmDatabase> = StaticCell::new();
 
 #[embassy_executor::task]
 pub async fn task(mut board: Board) {
@@ -27,11 +31,14 @@ pub async fn task(mut board: Board) {
     println!("OV2640 ready (QVGA RGB565)");
 
     board.init_storage().await;
+    let palm_db = PALM_DB.init(PalmDatabase::new());
+    let mut palm_notice: Option<(PalmNotice, Instant)> = None;
     let mut storage_test: Option<SelfTest> = None;
     let mut storage_error: Option<&'static str> = None;
     let mut storage_tested = false;
 
-    let mut analyzer = Analyzer::default();
+    let mut face_analyzer = FaceAnalyzer::default();
+    let mut palm_analyzer = PalmAnalyzer::default();
 
     let mut mode = Mode::Camera;
     let mut paused = false;
@@ -51,20 +58,52 @@ pub async fn task(mut board: Board) {
             last_scan = Instant::now();
 
             if let Some(button) = board.poll_button() {
-                match button {
-                    Button::Up | Button::Boot => {
-                        mode = mode.next();
-                        paused = false;
+                if mode == Mode::Palm {
+                    match button {
+                        Button::Boot => {
+                            mode = mode.next();
+                            paused = false;
+                            palm_notice = None;
+                        }
+                        Button::Up => {
+                            let notice = enroll_palm(board.frame, palm_db);
+                            println!("palm enroll: {:?}", notice);
+                            palm_notice = Some((notice, Instant::now() + Duration::from_secs(2)));
+                            board.camera_stop();
+                            ui.show_palm_notice(&mut board.display, notice);
+                        }
+                        Button::Play => {
+                            let notice = recognize_palm(board.frame, palm_db);
+                            println!("palm recognize: {:?}", notice);
+                            palm_notice = Some((notice, Instant::now() + Duration::from_secs(2)));
+                            board.camera_stop();
+                            ui.show_palm_notice(&mut board.display, notice);
+                        }
+                        Button::Down => {
+                            let count = palm_db.delete_last();
+                            let notice = PalmNotice::Deleted(count);
+                            println!("palm delete: {} templates", count);
+                            palm_notice = Some((notice, Instant::now() + Duration::from_secs(2)));
+                            board.camera_stop();
+                            ui.show_palm_notice(&mut board.display, notice);
+                        }
                     }
-                    Button::Down => {
-                        mode = mode.previous();
-                        paused = false;
-                    }
-                    Button::Play => {
-                        if mode != Mode::Standby && mode != Mode::Storage {
-                            paused = !paused;
-                            if paused {
-                                ui.show_pause(&mut board.display);
+                } else {
+                    match button {
+                        Button::Up | Button::Boot => {
+                            mode = mode.next();
+                            paused = false;
+                        }
+                        Button::Down => {
+                            mode = mode.previous();
+                            paused = false;
+                        }
+                        Button::Play => {
+                            if mode != Mode::Standby && mode != Mode::Storage {
+                                paused = !paused;
+                                if paused {
+                                    ui.show_pause(&mut board.display);
+                                }
                             }
                         }
                     }
@@ -78,17 +117,27 @@ pub async fn task(mut board: Board) {
                     board.buttons.last_raw()
                 );
 
-                analyzer = Analyzer::default();
+                face_analyzer = FaceAnalyzer::default();
+                palm_analyzer = PalmAnalyzer::default();
                 if mode == Mode::Storage {
                     storage_tested = false;
                 }
+                if mode != Mode::Palm {
+                    palm_notice = None;
+                }
 
-                if mode == Mode::Standby || mode == Mode::Storage || paused {
+                if mode == Mode::Standby || mode == Mode::Storage || paused || palm_notice.is_some()
+                {
                     board.camera_stop();
                 }
 
                 if mode == Mode::Standby {
                     ui.show_standby(&mut board.display);
+                } else if mode == Mode::Palm {
+                    if palm_notice.is_none() {
+                        ui.draw_status_bar(&mut board.display, mode, fps);
+                        displayed_fps = fps;
+                    }
                 } else if mode == Mode::Storage {
                     let capacity = board.sd_capacity_mib().unwrap_or(0);
                     let test = storage_test.unwrap_or_default();
@@ -109,6 +158,18 @@ pub async fn task(mut board: Board) {
                     displayed_fps = fps;
                 }
             }
+        }
+
+        if let Some((_, until)) = palm_notice {
+            if Instant::now() < until {
+                board.led_off();
+                Timer::after(Duration::from_millis(50)).await;
+                continue;
+            }
+            palm_notice = None;
+            board.camera_start();
+            ui.draw_status_bar(&mut board.display, mode, fps);
+            displayed_fps = fps;
         }
 
         if mode == Mode::Standby {
@@ -185,18 +246,22 @@ pub async fn task(mut board: Board) {
             }
 
             let analyse_start = Instant::now();
-            let analysis = analyse(board.frame, mode, &mut analyzer);
+            let (face, keypoints, palm) = match mode {
+                Mode::Face => {
+                    let result = face_analyzer.analyze(board.frame);
+                    (result.face, result.keypoints, None)
+                }
+                Mode::Palm => (None, None, palm_analyzer.analyze(board.frame)),
+                _ => (None, None, None),
+            };
             let analyse_ms = analyse_start.elapsed().as_millis();
             if mode == Mode::Face && frame_count.is_multiple_of(60) {
-                println!(
-                    "  face={:?} keypoints={:?}",
-                    analysis.face, analysis.keypoints
-                );
+                println!("  face={:?} keypoints={:?}", face, keypoints);
             }
             let overlay = Overlay {
-                motion: analysis.motion,
-                face: analysis.face,
-                keypoints: analysis.keypoints,
+                face,
+                keypoints,
+                palm,
             };
 
             let draw_start = Instant::now();
@@ -217,5 +282,34 @@ pub async fn task(mut board: Board) {
         } else {
             Timer::after(Duration::from_millis(10)).await;
         }
+    }
+}
+
+fn enroll_palm(frame: &[u8], database: &mut PalmDatabase) -> PalmNotice {
+    let Some(roi) = palm_roi(frame) else {
+        return PalmNotice::NoPalm;
+    };
+    let Some(descriptor) = palm_descriptor(frame, roi) else {
+        return PalmNotice::NoPalm;
+    };
+    match database.enroll(descriptor) {
+        Some(id) => PalmNotice::Enrolled(id),
+        None => PalmNotice::NoSpace,
+    }
+}
+
+fn recognize_palm(frame: &[u8], database: &PalmDatabase) -> PalmNotice {
+    let Some(roi) = palm_roi(frame) else {
+        return PalmNotice::NoPalm;
+    };
+    let Some(descriptor) = palm_descriptor(frame, roi) else {
+        return PalmNotice::NoPalm;
+    };
+    match database.recognize(descriptor) {
+        Some(result) => PalmNotice::Match {
+            id: result.id,
+            score: result.score,
+        },
+        None => PalmNotice::NoMatch,
     }
 }

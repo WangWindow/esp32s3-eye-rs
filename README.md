@@ -10,12 +10,13 @@ OV2640 → LCD_CAM + GDMA → RGB565 → ST7789 240×240
 
 - OV2640 QVGA RGB565，20 MHz XCLK，稳定 **12 FPS**
 - ST7789 240×240，SPI 80 MHz，RGB565 逐行直拷
-- `CAM` / `MOTION` / `FACE` / `SD` / `STANDBY` 五种模式
-- 运动检测、肤色人脸候选框、5 点关键点（启发式）
+- `CAM` / `FACE` / `PALM` / `SD` / `STANDBY` 五种模式
+- 肤色人脸候选框、5 点关键点（启发式）
+- 掌纹识别：掌部 ROI + HOG 纹理描述 + 模板匹配（演示级，非训练模型）
 - microSD 1-bit SDMMC：容量检测 + 非破坏性块读写自检
 - UP / DOWN / PLAY / BOOT 按键，PLAY 暂停，LED 指示
 
-> `FACE` 不是 ESP-DL 人脸识别，只是肤色 + 关键点演示。
+> `FACE` 和 `PALM` 都是启发式演示，不是 ESP-DL/训练模型。PALM 模板只保存在 RAM，重启后清空。
 
 ## 引脚
 
@@ -68,16 +69,27 @@ probe-rs gdb --chip esp32s3 target/xtensa-esp32s3-none-elf/release/esp32s3-eye
 
 ## 操作
 
+普通模式：
+
 | 按键 | 功能 |
 | --- | --- |
 | UP / BOOT | 下一个模式 |
 | DOWN | 上一个模式 |
 | PLAY | 暂停 / 恢复 |
 
+PALM 模式：
+
+| 按键 | 功能 |
+| --- | --- |
+| UP | 录入当前掌纹 |
+| PLAY | 识别当前掌纹 |
+| DOWN | 删除最后一个模板 |
+| BOOT | 下一个模式 |
+
 ## 代码划分
 
 - 通用驱动：`ov2640`、`esp32s3-lcd-cam`、`st7789`、`sd-card`
-- 板级配置与板载按键：`esp32s3-eye-board`
-- 应用、显示 UI、菜单、视觉算法：`esp32s3-eye-app`
+- 板级 BSP：`esp32s3-eye-board`，统一暴露 camera/display/SD/buttons/LED
+- 应用：`esp32s3-eye-app`，只通过 `Board` 访问硬件；`face/`、`palm/` 隔离算法
 
 许可证：MIT

@@ -8,9 +8,9 @@ use esp32s3_eye_board::{
     LCD_ROW_BYTES, LCD_WIDTH, STATUS_BAR_HEIGHT,
 };
 
-use crate::geometry::{Point, Rect};
-use crate::graphics::{GLYPH_ADVANCE, GLYPH_HEIGHT, GLYPH_WIDTH, glyph, text_width};
-use crate::modes::Mode;
+use crate::Mode;
+use crate::{GLYPH_ADVANCE, GLYPH_HEIGHT, GLYPH_WIDTH, glyph, text_width};
+use crate::{Point, Rect};
 
 pub const BLACK: u16 = 0x0000;
 pub const WHITE: u16 = 0xFFFF;
@@ -24,9 +24,9 @@ pub const DARK_GRAY: u16 = 0x4208;
 
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Overlay {
-    pub motion: bool,
     pub face: Option<Rect>,
     pub keypoints: Option<[Point; 5]>,
+    pub palm: Option<Rect>,
 }
 
 fn apply_overlay(line: &mut [u8; LCD_ROW_BYTES], screen_y: usize, overlay: Overlay) {
@@ -37,12 +37,6 @@ fn apply_overlay(line: &mut [u8; LCD_ROW_BYTES], screen_y: usize, overlay: Overl
             line[x * 2 + 1] = bytes[1];
         }
     };
-
-    if overlay.motion && (22..40).contains(&screen_y) {
-        for x in 4..22 {
-            put(x, BLUE);
-        }
-    }
 
     if let Some(rect) = overlay.face {
         let y = screen_y as u16;
@@ -67,6 +61,29 @@ fn apply_overlay(line: &mut [u8; LCD_ROW_BYTES], screen_y: usize, overlay: Overl
         }
     }
 
+    if let Some(rect) = overlay.palm {
+        let y = screen_y as u16;
+        if y >= rect.y && y < rect.y.saturating_add(rect.h) {
+            let left = rect.x as usize;
+            let right = (rect.x as usize + rect.w as usize).min(LCD_WIDTH);
+            let top_border = y < rect.y.saturating_add(2);
+            let bottom_border = y.saturating_add(2) >= rect.y.saturating_add(rect.h);
+
+            if top_border || bottom_border {
+                for x in left..right {
+                    put(x, GREEN);
+                }
+            } else {
+                for x in left..(left + 2).min(right) {
+                    put(x, GREEN);
+                }
+                for x in right.saturating_sub(2)..right {
+                    put(x, GREEN);
+                }
+            }
+        }
+    }
+
     if let Some(points) = overlay.keypoints {
         for point in points {
             if (screen_y as i32 - point.y as i32).abs() <= 1 {
@@ -79,6 +96,16 @@ fn apply_overlay(line: &mut [u8; LCD_ROW_BYTES], screen_y: usize, overlay: Overl
             }
         }
     }
+}
+
+#[derive(Clone, Copy, Debug)]
+pub enum PalmNotice {
+    Enrolled(u8),
+    Match { id: u8, score: u32 },
+    NoMatch,
+    NoPalm,
+    NoSpace,
+    Deleted(usize),
 }
 
 pub struct Ui {
@@ -231,6 +258,40 @@ impl Ui {
         self.draw_text_centered(panel, 200, "UP / DOWN TO EXIT", GRAY, BLACK, 1);
     }
 
+    pub fn show_palm_notice(&mut self, panel: &mut Panel, notice: PalmNotice) {
+        panel.fill_screen(BLACK);
+        self.draw_text_centered(panel, 36, "PALM", WHITE, BLACK, 2);
+
+        let (title, color) = match notice {
+            PalmNotice::Enrolled(_) => ("ENROLLED", GREEN),
+            PalmNotice::Match { .. } => ("MATCH", GREEN),
+            PalmNotice::NoMatch => ("NO MATCH", RED),
+            PalmNotice::NoPalm => ("NO PALM", YELLOW),
+            PalmNotice::NoSpace => ("DATABASE FULL", RED),
+            PalmNotice::Deleted(_) => ("DELETED", YELLOW),
+        };
+        self.draw_text_centered(panel, 92, title, color, BLACK, 2);
+
+        let mut buffer = [0u8; 12];
+        let detail = match notice {
+            PalmNotice::Enrolled(id) => format_detail("TEMPLATE ", id as u32, &mut buffer),
+            PalmNotice::Match { id, .. } => format_detail("ID ", id as u32, &mut buffer),
+            PalmNotice::Deleted(count) => format_detail("TEMPLATES ", count as u32, &mut buffer),
+            PalmNotice::NoMatch => "TRY AGAIN",
+            PalmNotice::NoPalm => "SHOW PALM TO CAMERA",
+            PalmNotice::NoSpace => "DELETE LAST TEMPLATE",
+        };
+        self.draw_text_centered(panel, 124, detail, GRAY, BLACK, 1);
+
+        if let PalmNotice::Match { score, .. } = notice {
+            let percent = (score + 5) / 10;
+            let score = format_percent(percent, &mut buffer);
+            self.draw_text_centered(panel, 142, score, CYAN, BLACK, 1);
+        }
+
+        self.draw_text_centered(panel, 194, "BOOT: NEXT MODE", GRAY, BLACK, 1);
+    }
+
     fn draw_rect(&mut self, panel: &mut Panel, rect: Rect, color: u16, thickness: u16) {
         panel.draw_rect(rect.x, rect.y, rect.w, rect.h, color, thickness);
     }
@@ -372,4 +433,42 @@ fn format_fps(value: u32, buffer: &mut [u8; 6]) -> &str {
     buffer[4] = b'P';
     buffer[5] = b'S';
     core::str::from_utf8(buffer).unwrap()
+}
+
+fn format_detail<'a>(prefix: &'a str, value: u32, buffer: &'a mut [u8; 12]) -> &'a str {
+    let mut digits = [0u8; 4];
+    let mut remaining = value;
+    let mut index = digits.len();
+    loop {
+        index -= 1;
+        digits[index] = b'0' + (remaining % 10) as u8;
+        remaining /= 10;
+        if remaining == 0 {
+            break;
+        }
+    }
+
+    let prefix_len = prefix.len();
+    buffer[..prefix_len].copy_from_slice(prefix.as_bytes());
+    let digit_len = digits.len() - index;
+    buffer[prefix_len..prefix_len + digit_len].copy_from_slice(&digits[index..]);
+    core::str::from_utf8(&buffer[..prefix_len + digit_len]).unwrap()
+}
+
+fn format_percent(value: u32, buffer: &mut [u8; 12]) -> &str {
+    let mut digits = [0u8; 3];
+    let mut remaining = value.min(100);
+    let mut index = digits.len();
+    loop {
+        index -= 1;
+        digits[index] = b'0' + (remaining % 10) as u8;
+        remaining /= 10;
+        if remaining == 0 {
+            break;
+        }
+    }
+    let len = digits.len() - index;
+    buffer[..len].copy_from_slice(&digits[index..]);
+    buffer[len..len + 6].copy_from_slice(b" SCORE");
+    core::str::from_utf8(&buffer[..len + 6]).unwrap()
 }
