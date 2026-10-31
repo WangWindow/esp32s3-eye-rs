@@ -1,0 +1,10 @@
+[package]
+name = "st7789"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Generic ST7789 SPI display driver"
+
+[dependencies]
+embedded-hal.workspace = true

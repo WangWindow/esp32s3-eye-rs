@@ -9,18 +9,21 @@ pub enum Mode {
     Motion = 1,
     /// Live preview plus a skin-colour face candidate box.
     Face = 2,
+    /// SD card information and read/write self-test.
+    Storage = 3,
     /// Static information screen; the camera is stopped.
-    Standby = 3,
+    Standby = 4,
 }
 
 impl Mode {
-    pub const COUNT: u8 = 4;
+    pub const COUNT: u8 = 5;
 
     pub const fn from_u8(value: u8) -> Self {
         match value % Self::COUNT {
             0 => Self::Camera,
             1 => Self::Motion,
             2 => Self::Face,
+            3 => Self::Storage,
             _ => Self::Standby,
         }
     }
@@ -39,6 +42,7 @@ impl Mode {
             Self::Camera => "CAM",
             Self::Motion => "MOTION",
             Self::Face => "FACE",
+            Self::Storage => "SD",
             Self::Standby => "STANDBY",
         }
     }
@@ -49,6 +53,7 @@ impl Mode {
             Self::Camera => 0x07E0,  // green
             Self::Motion => 0x07FF,  // cyan
             Self::Face => 0xFD20,    // orange
+            Self::Storage => 0xFFE0, // yellow
             Self::Standby => 0x8410, // grey
         }
     }

@@ -1,0 +1,11 @@
+[package]
+name = "ov2640"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "OV2640 camera sensor driver over SCCB (I2C)"
+
+[dependencies]
+embassy-time.workspace = true
+embedded-hal.workspace = true

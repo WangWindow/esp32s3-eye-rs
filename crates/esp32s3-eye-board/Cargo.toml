@@ -1,0 +1,19 @@
+[package]
+name = "esp32s3-eye-board"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "ESP32-S3-EYE board constants, pin map and display geometry"
+
+[dependencies]
+sd-card.workspace = true
+st7789.workspace = true
+esp32s3-lcd-cam.workspace = true
+ov2640.workspace = true
+static_cell.workspace = true
+embedded-hal-async.workspace = true
+embassy-time.workspace = true
+esp-println.workspace = true
+esp-rtos.workspace = true
+esp-hal.workspace = true

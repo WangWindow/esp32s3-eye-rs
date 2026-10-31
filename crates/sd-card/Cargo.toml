@@ -1,0 +1,13 @@
+[package]
+name = "sd-card"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Generic SD card block access and read/write self-test over MmcBus"
+
+[dependencies]
+sdio.workspace = true
+block-device-driver.workspace = true
+aligned.workspace = true
+embedded-hal-async.workspace = true
