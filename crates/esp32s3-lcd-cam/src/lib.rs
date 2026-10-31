@@ -5,6 +5,7 @@
 //! VSYNC/EOF-aligned frame assembly.
 
 #![no_std]
+#![allow(unexpected_cfgs)]
 #![allow(clippy::collapsible_if, clippy::unnecessary_cast)]
 
 mod capture;

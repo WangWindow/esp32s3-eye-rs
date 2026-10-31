@@ -15,6 +15,11 @@ path = "src/lib.rs"
 name = "esp32s3-eye"
 path = "src/main.rs"
 
+[features]
+default = ["face"]
+face = []
+palm = []
+
 [dependencies]
 esp-hal.workspace = true
 esp-rtos.workspace = true

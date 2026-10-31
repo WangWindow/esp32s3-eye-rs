@@ -10,7 +10,7 @@ OV2640 → LCD_CAM + GDMA → RGB565 → ST7789 240×240
 
 - OV2640 QVGA RGB565，20 MHz XCLK，稳定 **12 FPS**
 - ST7789 240×240，SPI 80 MHz，RGB565 逐行直拷
-- `CAM` / `FACE` / `PALM` / `SD` / `STANDBY` 五种模式
+- `CAM` / `FACE` / `PALM` / `SD` / `STANDBY` 模式（FACE 默认启用，PALM 可选）
 - 肤色人脸候选框、5 点关键点（启发式）
 - 掌纹识别：掌部 ROI + HOG 纹理描述 + 模板匹配（演示级，非训练模型）
 - microSD 1-bit SDMMC：容量检测 + 非破坏性块读写自检
@@ -40,10 +40,18 @@ espup install --targets esp32s3
 source ~/export-esp.sh
 cargo install espflash --locked
 
-cargo build --release
+cargo build --release                              # 默认 face
+cargo build --release --features palm             # face + palm
+cargo build --release --no-default-features --features palm   # 仅 palm
 ```
 
 每个新终端都需要先 `source ~/export-esp.sh`。
+
+`face` 和 `palm` 是 Cargo feature：
+
+- `face` 默认开启：人脸候选框 + 5 点关键点
+- `palm` 可选：掌纹 ROI + 录入/识别
+- 两个 feature 可以同时开启，也可以只开其中一个
 
 ## 烧录
 
@@ -51,6 +59,9 @@ cargo build --release
 cargo run --release
 # 或指定串口
 ESPFLASH_PORT=/dev/ttyACM1 cargo run --release
+
+# 掌纹版
+cargo run --release --no-default-features --features palm
 ```
 
 首次烧录由 espflash 写入 ESP-IDF 引导程序和分区表。之后可以只更新应用：
@@ -77,7 +88,7 @@ probe-rs gdb --chip esp32s3 target/xtensa-esp32s3-none-elf/release/esp32s3-eye
 | DOWN | 上一个模式 |
 | PLAY | 暂停 / 恢复 |
 
-PALM 模式：
+启用 `palm` feature 后，PALM 模式：
 
 | 按键 | 功能 |
 | --- | --- |

@@ -10,7 +10,3 @@ description = "ESP32-S3 LCD_CAM + GDMA DVP capture driver"
 esp-hal.workspace = true
 embassy-time.workspace = true
 
-[features]
-default = []
-defmt = []
-psram_dma = []

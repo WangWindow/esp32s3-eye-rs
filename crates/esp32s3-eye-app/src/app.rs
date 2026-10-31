@@ -6,13 +6,19 @@ use esp_println::println;
 use esp32s3_eye_board::Board;
 use esp32s3_eye_board::buttons::Button;
 use esp32s3_eye_board::storage::SelfTest;
+#[cfg(feature = "palm")]
 use static_cell::StaticCell;
 
 use crate::Mode;
-use crate::display::{Overlay, PalmNotice, Ui};
+#[cfg(feature = "palm")]
+use crate::display::PalmNotice;
+use crate::display::{Overlay, Ui};
+#[cfg(feature = "face")]
 use crate::face::FaceAnalyzer;
+#[cfg(feature = "palm")]
 use crate::palm::{PalmAnalyzer, PalmDatabase, palm_descriptor, palm_roi};
 
+#[cfg(feature = "palm")]
 static PALM_DB: StaticCell<PalmDatabase> = StaticCell::new();
 
 #[embassy_executor::task]
@@ -31,13 +37,17 @@ pub async fn task(mut board: Board) {
     println!("OV2640 ready (QVGA RGB565)");
 
     board.init_storage().await;
+    #[cfg(feature = "palm")]
     let palm_db = PALM_DB.init(PalmDatabase::new());
+    #[cfg(feature = "palm")]
     let mut palm_notice: Option<(PalmNotice, Instant)> = None;
     let mut storage_test: Option<SelfTest> = None;
     let mut storage_error: Option<&'static str> = None;
     let mut storage_tested = false;
 
+    #[cfg(feature = "face")]
     let mut face_analyzer = FaceAnalyzer::default();
+    #[cfg(feature = "palm")]
     let mut palm_analyzer = PalmAnalyzer::default();
 
     let mut mode = Mode::Camera;
@@ -58,7 +68,13 @@ pub async fn task(mut board: Board) {
             last_scan = Instant::now();
 
             if let Some(button) = board.poll_button() {
-                if mode == Mode::Palm {
+                #[cfg(feature = "palm")]
+                let palm_mode = mode == Mode::Palm;
+                #[cfg(not(feature = "palm"))]
+                let palm_mode = false;
+
+                #[cfg(feature = "palm")]
+                if palm_mode {
                     match button {
                         Button::Boot => {
                             mode = mode.next();
@@ -88,7 +104,9 @@ pub async fn task(mut board: Board) {
                             ui.show_palm_notice(&mut board.display, notice);
                         }
                     }
-                } else {
+                }
+
+                if !palm_mode {
                     match button {
                         Button::Up | Button::Boot => {
                             mode = mode.next();
@@ -117,49 +135,64 @@ pub async fn task(mut board: Board) {
                     board.buttons.last_raw()
                 );
 
-                face_analyzer = FaceAnalyzer::default();
-                palm_analyzer = PalmAnalyzer::default();
+                #[cfg(feature = "face")]
+                {
+                    face_analyzer = FaceAnalyzer::default();
+                }
+                #[cfg(feature = "palm")]
+                {
+                    palm_analyzer = PalmAnalyzer::default();
+                    if mode != Mode::Palm {
+                        palm_notice = None;
+                    }
+                }
                 if mode == Mode::Storage {
                     storage_tested = false;
                 }
-                if mode != Mode::Palm {
-                    palm_notice = None;
-                }
 
-                if mode == Mode::Standby || mode == Mode::Storage || paused || palm_notice.is_some()
-                {
+                #[cfg(feature = "palm")]
+                let notice_active = palm_notice.is_some();
+                #[cfg(not(feature = "palm"))]
+                let notice_active = false;
+
+                if mode == Mode::Standby || mode == Mode::Storage || paused || notice_active {
                     board.camera_stop();
                 }
 
-                if mode == Mode::Standby {
-                    ui.show_standby(&mut board.display);
-                } else if mode == Mode::Palm {
-                    if palm_notice.is_none() {
+                match mode {
+                    Mode::Standby => ui.show_standby(&mut board.display),
+                    #[cfg(feature = "palm")]
+                    Mode::Palm => {
+                        if palm_notice.is_none() {
+                            ui.draw_status_bar(&mut board.display, mode, fps);
+                            displayed_fps = fps;
+                        }
+                    }
+                    Mode::Storage => {
+                        let capacity = board.sd_capacity_mib().unwrap_or(0);
+                        let test = storage_test.unwrap_or_default();
+                        let error = storage_error.or(if board.storage.is_none() {
+                            Some("NO SD CARD")
+                        } else {
+                            None
+                        });
+                        ui.show_storage(
+                            &mut board.display,
+                            capacity,
+                            test.read_ok,
+                            test.write_ok,
+                            error,
+                        );
+                    }
+                    _ => {
                         ui.draw_status_bar(&mut board.display, mode, fps);
                         displayed_fps = fps;
                     }
-                } else if mode == Mode::Storage {
-                    let capacity = board.sd_capacity_mib().unwrap_or(0);
-                    let test = storage_test.unwrap_or_default();
-                    let error = storage_error.or(if board.storage.is_none() {
-                        Some("NO SD CARD")
-                    } else {
-                        None
-                    });
-                    ui.show_storage(
-                        &mut board.display,
-                        capacity,
-                        test.read_ok,
-                        test.write_ok,
-                        error,
-                    );
-                } else {
-                    ui.draw_status_bar(&mut board.display, mode, fps);
-                    displayed_fps = fps;
                 }
             }
         }
 
+        #[cfg(feature = "palm")]
         if let Some((_, until)) = palm_notice {
             if Instant::now() < until {
                 board.led_off();
@@ -247,14 +280,17 @@ pub async fn task(mut board: Board) {
 
             let analyse_start = Instant::now();
             let (face, keypoints, palm) = match mode {
+                #[cfg(feature = "face")]
                 Mode::Face => {
                     let result = face_analyzer.analyze(board.frame);
                     (result.face, result.keypoints, None)
                 }
+                #[cfg(feature = "palm")]
                 Mode::Palm => (None, None, palm_analyzer.analyze(board.frame)),
                 _ => (None, None, None),
             };
             let analyse_ms = analyse_start.elapsed().as_millis();
+            #[cfg(feature = "face")]
             if mode == Mode::Face && frame_count.is_multiple_of(60) {
                 println!("  face={:?} keypoints={:?}", face, keypoints);
             }
@@ -285,6 +321,7 @@ pub async fn task(mut board: Board) {
     }
 }
 
+#[cfg(feature = "palm")]
 fn enroll_palm(frame: &[u8], database: &mut PalmDatabase) -> PalmNotice {
     let Some(roi) = palm_roi(frame) else {
         return PalmNotice::NoPalm;
@@ -298,6 +335,7 @@ fn enroll_palm(frame: &[u8], database: &mut PalmDatabase) -> PalmNotice {
     }
 }
 
+#[cfg(feature = "palm")]
 fn recognize_palm(frame: &[u8], database: &PalmDatabase) -> PalmNotice {
     let Some(roi) = palm_roi(frame) else {
         return PalmNotice::NoPalm;

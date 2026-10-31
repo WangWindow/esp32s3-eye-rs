@@ -98,6 +98,7 @@ fn apply_overlay(line: &mut [u8; LCD_ROW_BYTES], screen_y: usize, overlay: Overl
     }
 }
 
+#[cfg(feature = "palm")]
 #[derive(Clone, Copy, Debug)]
 pub enum PalmNotice {
     Enrolled(u8),
@@ -258,6 +259,7 @@ impl Ui {
         self.draw_text_centered(panel, 200, "UP / DOWN TO EXIT", GRAY, BLACK, 1);
     }
 
+    #[cfg(feature = "palm")]
     pub fn show_palm_notice(&mut self, panel: &mut Panel, notice: PalmNotice) {
         panel.fill_screen(BLACK);
         self.draw_text_centered(panel, 36, "PALM", WHITE, BLACK, 2);
@@ -435,6 +437,7 @@ fn format_fps(value: u32, buffer: &mut [u8; 6]) -> &str {
     core::str::from_utf8(buffer).unwrap()
 }
 
+#[cfg(feature = "palm")]
 fn format_detail<'a>(prefix: &'a str, value: u32, buffer: &'a mut [u8; 12]) -> &'a str {
     let mut digits = [0u8; 4];
     let mut remaining = value;
@@ -455,6 +458,7 @@ fn format_detail<'a>(prefix: &'a str, value: u32, buffer: &'a mut [u8; 12]) -> &
     core::str::from_utf8(&buffer[..prefix_len + digit_len]).unwrap()
 }
 
+#[cfg(feature = "palm")]
 fn format_percent(value: u32, buffer: &mut [u8; 12]) -> &str {
     let mut digits = [0u8; 3];
     let mut remaining = value.min(100);

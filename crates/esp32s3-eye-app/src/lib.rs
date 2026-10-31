@@ -194,33 +194,55 @@ pub const fn text_width(text: &str, scale: usize) -> usize {
     bytes.len() * GLYPH_ADVANCE * scale - scale
 }
 
-// Demo modes. The order is also the order used by the UP/DOWN buttons.
+// Demo modes. Feature-gated algorithms determine which entries exist.
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(u8)]
 pub enum Mode {
     /// Live camera preview.
-    Camera = 0,
+    Camera,
     /// Live preview plus a skin-colour face candidate box.
-    Face = 1,
+    #[cfg(feature = "face")]
+    Face,
     /// Palm ROI preview and palmprint recognition.
-    Palm = 2,
+    #[cfg(feature = "palm")]
+    Palm,
     /// SD card information and read/write self-test.
-    Storage = 3,
+    Storage,
     /// Static information screen; the camera is stopped.
-    Standby = 4,
+    Standby,
 }
 
 impl Mode {
-    pub const COUNT: u8 = 5;
+    pub const COUNT: u8 = 3 + cfg!(feature = "face") as u8 + cfg!(feature = "palm") as u8;
 
     pub const fn from_u8(value: u8) -> Self {
-        match value % Self::COUNT {
-            0 => Self::Camera,
-            1 => Self::Face,
-            2 => Self::Palm,
-            3 => Self::Storage,
-            _ => Self::Standby,
+        let mut index = value % Self::COUNT;
+        if index == 0 {
+            return Self::Camera;
+        }
+        index -= 1;
+
+        #[cfg(feature = "face")]
+        {
+            if index == 0 {
+                return Self::Face;
+            }
+            index -= 1;
+        }
+
+        #[cfg(feature = "palm")]
+        {
+            if index == 0 {
+                return Self::Palm;
+            }
+            index -= 1;
+        }
+
+        if index == 0 {
+            Self::Storage
+        } else {
+            Self::Standby
         }
     }
 
@@ -236,7 +258,9 @@ impl Mode {
     pub const fn label(self) -> &'static str {
         match self {
             Self::Camera => "CAM",
+            #[cfg(feature = "face")]
             Self::Face => "FACE",
+            #[cfg(feature = "palm")]
             Self::Palm => "PALM",
             Self::Storage => "SD",
             Self::Standby => "STANDBY",
@@ -246,9 +270,11 @@ impl Mode {
     /// Accent colour (RGB565) for the mode indicator.
     pub const fn accent(self) -> u16 {
         match self {
-            Self::Camera => 0x07E0,  // green
-            Self::Face => 0xFD20,    // orange
-            Self::Palm => 0xF81F,    // magenta
+            Self::Camera => 0x07E0, // green
+            #[cfg(feature = "face")]
+            Self::Face => 0xFD20, // orange
+            #[cfg(feature = "palm")]
+            Self::Palm => 0xF81F, // magenta
             Self::Storage => 0xFFE0, // yellow
             Self::Standby => 0x8410, // grey
         }
@@ -256,7 +282,10 @@ impl Mode {
 }
 
 pub mod app;
+#[cfg(any(feature = "face", feature = "palm"))]
 mod detect;
 pub mod display;
+#[cfg(feature = "face")]
 pub mod face;
+#[cfg(feature = "palm")]
 pub mod palm;

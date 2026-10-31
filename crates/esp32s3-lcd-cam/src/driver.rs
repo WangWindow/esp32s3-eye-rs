@@ -321,14 +321,6 @@ impl<'a> AsyncCameraDriver<'a> {
         self.dma.clear_all();
         self.dma.reset();
 
-        #[cfg(feature = "psram_dma")]
-        if preparation.accesses_psram && !self.dma.can_access_psram() {
-            return Err(DmaError::UnsupportedMemoryRegion);
-        }
-
-        #[cfg(feature = "psram_dma")]
-        self.rx_impl
-            .set_ext_mem_block_size(preparation.burst_transfer.external_memory.into());
         self.dma.set_burst_mode(preparation.burst_transfer);
         self.dma.set_descr_burst_mode(true);
         self.dma.set_mem2mem_mode(false);
